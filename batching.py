@@ -18,8 +18,8 @@ class MobileNetV3_MultiHead(nn.Module):
             out = self.flatten(self.pool(self.features(dummy)))
             in_features = out.shape[1]
 
-        self.head1 = nn.Linear(in_features, num_classes1)
-        self.head2 = nn.Linear(in_features, num_classes2)
+        self.head1 = nn.Linear(in_features, num_classes1)  # brand
+        self.head2 = nn.Linear(in_features, num_classes2)  # color
 
     def forward(self, x):
         x = self.features(x)
@@ -32,11 +32,11 @@ model = MobileNetV3_MultiHead()
 model.load_state_dict(torch.load("models/model N4/multihead_best.pth", map_location="cpu"))
 model.eval()
 
-# === 3. Подготовка фиктивного входа с batch_size > 1 (например, 4) ===
-dummy_input = torch.randn(4, 3, 224, 224)
+# === 3. Подготовка фиктивного входа с batch_size > 1 ===
+dummy_input = torch.randn(4, 3, 224, 224)  # Batch size 4, можно любое >1
 
-# === 4. Экспорт с поддержкой динамического batch size ===
-output_path = "multihead.onnx"
+# === 4. Экспорт в ONNX с динамической осью batch_size ===
+output_path = "multihead(batching).onnx"
 torch.onnx.export(
     model,
     dummy_input,
@@ -51,3 +51,5 @@ torch.onnx.export(
     }
 )
 
+print(f"✅ Экспорт завершён: {output_path}")
+print(f"📁 Размер файла: {round(os.path.getsize(output_path) / 1024 / 1024, 2)} MB")
