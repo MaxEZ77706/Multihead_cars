@@ -2,11 +2,12 @@ import cv2
 import torch
 import torch.nn as nn
 from torchvision import transforms
-from torchvision.models import efficientnet_b0
+from torchvision.models import mobilenet_v3_large
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
 import time
+from torch.utils.tensorboard import SummaryWriter  # ✅ TensorBoard
 
 # === DEVICE SETUP ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -15,15 +16,15 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 object_detector = YOLO("yolo11n.pt")
 
 # === LOAD CAR TYPE CLASSIFIER ===
-brand_model = efficientnet_b0(weights=None)
-brand_model.classifier[1] = nn.Linear(1280, 5)
-brand_model.load_state_dict(torch.load("car_detection_best_eff_0(model1).pth", map_location=device))
+brand_model = mobilenet_v3_large(weights=None)
+brand_model.classifier[3] = nn.Linear(1280, 5)
+brand_model.load_state_dict(torch.load("models/model N2/car_detection_best_mobilenetv3.pth", map_location=device))
 brand_model.to(device).eval()
 
 # === LOAD CAR COLOR CLASSIFIER ===
-color_model = efficientnet_b0(weights=None)
-color_model.classifier[1] = nn.Linear(1280, 5)
-color_model.load_state_dict(torch.load("color_detection_best_eff_0(model1).pth", map_location=device))
+color_model = mobilenet_v3_large(weights=None)
+color_model.classifier[3] = nn.Linear(1280, 5)
+color_model.load_state_dict(torch.load("models/model N2/color_detection_best_mobilenetv3.pth", map_location=device))
 color_model.to(device).eval()
 
 # === LABELS ===
@@ -43,23 +44,27 @@ cap = cv2.VideoCapture("my_cars1.mp4")
 original_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 original_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 fps = cap.get(cv2.CAP_PROP_FPS)
+
 width = original_width // 4
 height = original_height // 4
 
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 out = cv2.VideoWriter("output_type_and_color.mp4", fourcc, fps, (width, height))
 
+# === TENSORBOARD LOGGER ===
+writer = SummaryWriter(log_dir="runs/mobilenet")  # ✅ Подпапка для этого эксперимента
+
 frame_id = 0
-total_time = 0
+total_elapsed = 0
 
 while cap.isOpened():
     start_time = time.time()
     success, frame = cap.read()
     if not success:
         break
+
     frame_id += 1
     annotated = frame.copy()
-
     results = object_detector(frame)
     boxes = results[0].boxes
 
@@ -69,8 +74,7 @@ while cap.isOpened():
         continue
 
     xyxy = boxes.xyxy.int().tolist()
-    crop_tensors = []
-    valid_boxes = []
+    crop_tensors, valid_boxes = [], []
 
     for (x1, y1, x2, y2) in xyxy:
         car_crop = frame[y1:y2, x1:x2]
@@ -102,9 +106,15 @@ while cap.isOpened():
     out.write(annotated_resized)
 
     elapsed = time.time() - start_time
-    total_time += elapsed
-    fps_calc = 1 / elapsed
-    print(f"✅ Frame {frame_id} done | ⚡ {fps_calc:.2f} FPS")
+    total_elapsed += elapsed
+
+    fps_curr = 1 / elapsed
+
+    print(f"✅ Frame {frame_id} done | ⚡ {fps_curr:.2f} FPS")
+
+    # === TENSORBOARD LOGGING ===
+    writer.add_scalar("Frame/Time", elapsed, frame_id)
+    writer.add_scalar("Frame/FPS", fps_curr, frame_id)
 
     cv2.imshow("Result", annotated_resized)
     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -113,7 +123,15 @@ while cap.isOpened():
 cap.release()
 out.release()
 cv2.destroyAllWindows()
+writer.close()  # ✅ Закрываем логгер
 
-print("🎉 Saved to output_type_and_color.mp4")
-print(f"🕒 Total processing time: {total_time:.2f} sec")
-print(f"📊 Average FPS: {frame_id / total_time:.2f}")
+# === FINAL STATS ===
+avg_time_per_frame = total_elapsed / frame_id
+avg_fps = frame_id / total_elapsed
+
+print("\n🕒 Processing finished.")
+print(f"🧮 Total frames: {frame_id}")
+print(f"⏱️ Total time: {total_elapsed:.2f} seconds")
+print(f"⚡ Avg time per frame: {avg_time_per_frame:.2f} sec")
+print(f"🎯 Avg FPS: {avg_fps:.2f}")
+print("🎉 Done: output_type_and_color.mp4 saved.")
