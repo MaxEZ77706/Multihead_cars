@@ -7,13 +7,12 @@ from ultralytics import YOLO
 from PIL import Image
 import numpy as np
 import time
-from torch.utils.tensorboard import SummaryWriter  # ✅ TensorBoard
 
 # === DEVICE SETUP ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # === LOAD YOLO DETECTOR ===
-object_detector = YOLO("yolo11n.pt")
+object_detector = YOLO("yolov8n.pt")
 
 # === LOAD CAR TYPE CLASSIFIER ===
 brand_model = mobilenet_v3_large(weights=None)
@@ -45,26 +44,25 @@ original_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 original_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 fps = cap.get(cv2.CAP_PROP_FPS)
 
+# Уменьшение размера в 4 раза
 width = original_width // 4
 height = original_height // 4
 
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 out = cv2.VideoWriter("output_type_and_color.mp4", fourcc, fps, (width, height))
 
-# === TENSORBOARD LOGGER ===
-writer = SummaryWriter(log_dir="runs/mobilenet")  # ✅ Подпапка для этого эксперимента
-
 frame_id = 0
 total_elapsed = 0
+start_global = time.time()
 
 while cap.isOpened():
     start_time = time.time()
     success, frame = cap.read()
     if not success:
         break
-
     frame_id += 1
     annotated = frame.copy()
+
     results = object_detector(frame)
     boxes = results[0].boxes
 
@@ -74,7 +72,8 @@ while cap.isOpened():
         continue
 
     xyxy = boxes.xyxy.int().tolist()
-    crop_tensors, valid_boxes = [], []
+    crop_tensors = []
+    valid_boxes = []
 
     for (x1, y1, x2, y2) in xyxy:
         car_crop = frame[y1:y2, x1:x2]
@@ -107,14 +106,7 @@ while cap.isOpened():
 
     elapsed = time.time() - start_time
     total_elapsed += elapsed
-
-    fps_curr = 1 / elapsed
-
-    print(f"✅ Frame {frame_id} done | ⚡ {fps_curr:.2f} FPS")
-
-    # === TENSORBOARD LOGGING ===
-    writer.add_scalar("Frame/Time", elapsed, frame_id)
-    writer.add_scalar("Frame/FPS", fps_curr, frame_id)
+    print(f"✅ Frame {frame_id} done | ⚡ {1 / elapsed:.2f} FPS")
 
     cv2.imshow("Result", annotated_resized)
     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -123,9 +115,8 @@ while cap.isOpened():
 cap.release()
 out.release()
 cv2.destroyAllWindows()
-writer.close()  # ✅ Закрываем логгер
 
-# === FINAL STATS ===
+# === Final Statistics ===
 avg_time_per_frame = total_elapsed / frame_id
 avg_fps = frame_id / total_elapsed
 
@@ -134,4 +125,4 @@ print(f"🧮 Total frames: {frame_id}")
 print(f"⏱️ Total time: {total_elapsed:.2f} seconds")
 print(f"⚡ Avg time per frame: {avg_time_per_frame:.2f} sec")
 print(f"🎯 Avg FPS: {avg_fps:.2f}")
-print("🎉 Done: output_type_and_color.mp4 saved.")
+print("🎉 Done: output_type_and_color(yolo).mp4 saved.")
