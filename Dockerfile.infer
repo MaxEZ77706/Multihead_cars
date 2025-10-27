@@ -1,0 +1,31 @@
+# ================= Base (общие зависимости) =================
+FROM python:3.10-slim-bookworm AS base
+ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY . /app
+
+# ================= Train =================
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS train
+RUN apt-get update && apt-get install -y --no-install-recommends git wget && rm -rf /var/lib/apt/lists/*
+# PyTorch CUDA
+RUN python3 -m pip install --upgrade pip && \
+    pip install torch==2.2.2+cu121 torchvision==0.17.2+cu121 \
+      -f https://download.pytorch.org/whl/cu121/torch_stable.html && \
+    pip install "numpy<2" ultralytics tensorboard jupyter albumentations opencv-python-headless
+WORKDIR /app
+COPY . /app
+CMD ["python3", "train.py"]
+
+# ================= Inference =================
+FROM python:3.10-slim-bookworm AS infer
+ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+RUN python -m pip install --upgrade pip && \
+    pip install "numpy<2" onnxruntime opencv-python-headless ultralytics \
+               torch==2.2.2 torchvision==0.17.2
+WORKDIR /app
+COPY . /app
+CMD ["python", "main.py"]
