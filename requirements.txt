@@ -1,0 +1,6 @@
+ultralytics>=8.2.0,<9
+onnxruntime>=1.16,<2
+numpy<2
+torch
+torchvision
+opencv-python
