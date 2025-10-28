@@ -129,26 +129,63 @@ Defaults:
 Use a Makefile to shorten common commands:
 
 ```Makefile
-.PHONY: venv install run docker-build docker-run clean
+# =======================
+# Settings
+# =======================
+PYTHON   ?= python3
+VENV      := .venv
+BIN       := $(VENV)/bin
+PIP       := $(BIN)/pip
+PY        := $(BIN)/python
 
-venv:
-	python3 -m venv .venv
-	. .venv/bin/activate && pip install --upgrade pip
+ENTRY ?= main.py           # your inference entry file
+REQ_FILE ?= requirements.txt
+YOLO_CACHE ?= .ultra_cache # Ultralytics cache (YOLO weights)
 
-install:
-	. .venv/bin/activate && pip install -r requirements.txt
+ARGS ?=                     # e.g.: make run ARGS="--input my_cars1.mp4"
 
-run:
-	. .venv/bin/activate && python main.py
+.DEFAULT_GOAL := help
 
-docker-build:
-	docker build -f Dockerfile.infer -t final_car:latest .
+# =======================
+# Help
+# =======================
+help:  ## Show available commands
+	@grep -E '^[.a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	awk 'BEGIN {FS=":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-docker-run:
-	docker run --rm -it -v "$(PWD):/app" -w /app final_car:latest python main.py
+# =======================
+# Env & deps (local)
+# =======================
+venv: ## Create a venv
+	$(PYTHON) -m venv $(VENV)
 
-clean:
-	rm -f output_multihead_batch.mp4
+install: venv ## Install dependencies from requirements.txt
+	$(PIP) install -U pip
+	@if [ -f $(REQ_FILE) ]; then $(PIP) install -r $(REQ_FILE); else echo "No $(REQ_FILE) found"; fi
+	@mkdir -p $(YOLO_CACHE)
+
+freeze: ## Freeze versions into requirements.lock.txt
+	$(PIP) freeze > requirements.lock.txt
+
+# =======================
+# Run (local)
+# =======================
+run: ## Run inference with visualization (cv2.imshow window)
+	@if [ -f $(ENTRY) ]; then SHOW_PREVIEW=1 YOLO_CONFIG_DIR=$(YOLO_CACHE) $(PY) $(ENTRY) $(ARGS); else echo "No $(ENTRY) found"; exit 1; fi
+
+run-headless: ## Run headless (save MP4 only)
+	@if [ -f $(ENTRY) ]; then SHOW_PREVIEW=0 YOLO_CONFIG_DIR=$(YOLO_CACHE) $(PY) $(ENTRY) $(ARGS); else echo "No $(ENTRY) found"; exit 1; fi
+
+# =======================
+# Clean
+# =======================
+clean: ## Remove temporary files/caches
+	rm -rf dist build *.egg-info
+	find . -type f -name "*.DS_Store" -ls -delete
+	find . | grep -E "(__pycache__|\.pyc|\.pyo)" | xargs rm -rf
+	find . | grep -E ".pytest_cache|.ipynb_checkpoints" | xargs rm -rf
+	rm -f .coverage
+
 ```
 
 ---
@@ -166,6 +203,72 @@ clean:
 9. **Diagnostics:** prints per‑frame latency and FPS; prints totals at the end.
 
 ---
+
+## Large Files: Git LFS (configured in this repo)
+
+I push datasets, ONNX models, and videos to Git **via LFS**. This keeps big artifacts (>100 MB) out of normal Git history and stores them as lightweight pointers.
+
+> ⚠️ **Heads‑up:** `git lfs migrate import` **rewrites history**. If the repo is public or others have cloned it, coordinate the force‑push first.
+
+```bash
+# ==== 0) Go to your repo root ====
+cd "/Users/maximshek/FINAL_CAR"   # <- change if your path differs
+
+# ==== 1) Stop DVC tracking if it exists (safe if file absent) ====
+dvc remove models.dvc    2>/dev/null || true
+dvc remove MultiLabel.dvc 2>/dev/null || true
+
+# ==== 2) Make sure Git is allowed to see these paths (un-ignore if needed) ====
+# (macOS sed; use 'sed -i' on Linux)
+sed -i '' '/^models\/$/d'     .gitignore 2>/dev/null || true
+sed -i '' '/^MultiLabel\/$/d' .gitignore 2>/dev/null || true
+sed -i '' '/^my_cars1\.mp4$/d' .gitignore 2>/dev/null || true
+
+# ==== 3) Install & enable Git LFS (once) ====
+brew install git-lfs || true
+git lfs install
+
+# ==== 4) Track the folders/files with LFS ====
+git lfs track "models/**" "MultiLabel/**" "my_cars1.mp4" \
+  "*.pt" "*.pth" "*.onnx" "*.ckpt" "*.safetensors" "*.zip" \
+  "*.jpg" "*.jpeg" "*.png" "*.webp" "*.bmp" "*.gif" "*.tif" "*.tiff" \
+  "*.mp4" "*.mov" "*.avi" "*.csv" "*.json" "*.npz" "*.npy"
+
+git add .gitattributes
+
+# Stage removals of *.dvc if they existed and the .gitignore edits
+git add -A
+git commit -m "Track models, MultiLabel, my_cars1.mp4 with Git LFS (stop DVC for these)"
+
+# ==== 5) Rewrite EXISTING history so old big blobs become LFS pointers ====
+git lfs migrate import --include="models/**,MultiLabel/**,my_cars1.mp4,*.pt,*.pth,*.onnx,*.ckpt,*.safetensors,*.zip,*.jpg,*.jpeg,*.png,*.webp,*.bmp,*.gif,*.tif,*.tiff,*.mp4,*.mov,*.avi,*.csv,*.json,*.npz,*.npy"
+
+# (Optional, to cover ALL branches & tags):
+# git lfs migrate import --everything --include="models/**,MultiLabel/**,my_cars1.mp4,*.pt,*.pth,*.onnx,*.ckpt,*.safetensors,*.zip,*.jpg,*.jpeg,*.png,*.webp,*.bmp,*.gif,*.tif,*.tiff,*.mp4,*.mov,*.avi,*.csv,*.json,*.npz,*.npy"
+
+# ==== 6) Push to GitHub (handles detached HEAD too) ====
+BR=$(git branch --show-current)
+if [ -z "$BR" ]; then
+  # create/update 'main' from current commit if detached
+  git push -f -u origin HEAD:main
+else
+  git push -f -u origin "$BR"
+fi
+
+# ==== 7) Quick verification ====
+git lfs ls-files | egrep -i '(^|/)(models|MultiLabel)/|my_cars1\.mp4' | head
+```
+
+**Verify in GitHub UI:** in commits/file view, big artifacts should appear as **LFS pointers** (not raw large files). The repo root must contain `.gitattributes` with the patterns above.
+
+**Git LFS quotas:** GitHub enforces LFS storage and bandwidth limits. Defaults are fine for small/public demos; for large datasets consider external storage.
+
+---
+
+
+* [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
+* [ONNX Runtime](https://onnxruntime.ai)
+
 
 ## Speed Tips
 
